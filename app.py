@@ -5,15 +5,20 @@ import mysql.connector
 from flask import Flask, render_template, request, redirect, url_for,session
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os
+import os,secrets
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Load configurations from JSON file
 with open('templates/config.json', 'r') as c:
     params = json.load(c)["params"]
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
-app.secret_key = 'your_unique_and_secret_key'
+# secret_key = secrets.token_hex(32)
+# 9501d48e0af1bbfb07ca7b63676dc401b5908753854c1a5ce5f9de63f8333667
+
+# print(secret_key)
+# app.secret_key = '9501d48e0af1bbfb07ca7b63676dc401b5908753854c1a5ce5f9de63f8333667'
+app.secret_key = os.environ.get('SECRET_KEY') or 'default_secret_key'
 
 # MySQL configurations
 db_config = {
@@ -62,11 +67,26 @@ def create_signup():
     cursor.execute("""create table if not exists signup (
         id INT AUTO_INCREMENT PRIMARY KEY,
         email VARCHAR(255) NOT NULL,
-        password VARCHAR(255) NOT NULL
+        password VARCHAR(255) NOT NULL,
+        register_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
     conn.commit()
     cursor.close()
     conn.close()
+
+def create_login_activity():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""create table if not exists Login_activity (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+create_login_activity()
 
 
 
@@ -138,13 +158,14 @@ def signup():
         cur.execute("select * from signup where email=%s", (email,))
         acc = cur.fetchone()
         if acc:
-            mesage = 'Already Exist! '
+            mesage = 'Email Already Exist! '
+            return render_template('login.html', mesage=mesage)
         elif password != confirm_password:
             mesage = 'Password Does Not Match!'
         else:
             try:
-
-                cur.execute("INSERT INTO signup(email, password) VALUES (%s, %s)", (email, password))
+                hashed_password = generate_password_hash(password)
+                cur.execute("INSERT INTO signup(email, password) VALUES (%s, %s)", (email, hashed_password))
                 con.commit()
                 cur.close()
                 con.close()
@@ -162,13 +183,20 @@ def login1():
         password =request.form['password']
         con = get_db_connection()
         cur = con.cursor()
-        cur.execute('select * from signup where email=%s and password=%s', (email, password))
+        cur.execute('select * from signup where email=%s', (email,))
         user=cur.fetchone()
-        if user:
+        if user and check_password_hash(user[2], password):
             session['logged_in'] = True
             session['email'] = user[0]
             session['password'] =user[1]
             mesage='logged in successfully'
+
+            cur.execute("INSERT INTO login_activity (email) VALUES (%s)", (email,))
+            con.commit()
+            cur.close()
+            con.close()
+
+
             return render_template('index.html', params=params)
         else:
             mesage='Invalid email or password'
